@@ -1,0 +1,103 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${BACKEND_IMAGE:-jumi-finance-rag-backend:latest}
+    container_name: jumi_finance_backend
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-80}:8000"
+    environment:
+      - MONGODB_URL=mongodb://mongo:27017
+      - MONGODB_DB=jumi_finance_db
+      - QDRANT_URL=http://qdrant:6333
+      - MEILI_URL=http://meilisearch:7700
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-change-this-production-search-key}
+      - RAG_EMBEDDING_PROVIDER=hash
+      - RAG_LLM_API_KEY=
+      - RAG_LLM_MODEL=
+      - DART_API_KEY=${DART_API_KEY:-}
+      - KOSIS_API_KEY=${KOSIS_API_KEY:-}
+      - BOK_API_KEY=${BOK_API_KEY:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-ap-northeast-2}
+      - LEX_BOT_ID=${LEX_BOT_ID:-}
+      - LEX_BOT_ALIAS_ID=${LEX_BOT_ALIAS_ID:-}
+      - LEX_LOCALE_ID=${LEX_LOCALE_ID:-ko_KR}
+    depends_on:
+      - mongo
+      - qdrant
+      - meilisearch
+    networks:
+      - investment-net
+
+  mongo:
+    image: mongo:7
+    container_name: jumi_finance_mongo
+    restart: unless-stopped
+    volumes:
+      - investment_mongo_data:/data/db
+    networks:
+      - investment-net
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: jumi_finance_qdrant
+    restart: unless-stopped
+    volumes:
+      - investment_qdrant_data:/qdrant/storage
+    networks:
+      - investment-net
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.15.2
+    container_name: jumi_finance_meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_ENV: production
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-change-this-production-search-key}
+    volumes:
+      - investment_meilisearch_data:/meili_data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:7700/health >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - investment-net
+
+  docs-index:
+    profiles: ["tools"]
+    image: ${BACKEND_IMAGE:-jumi-finance-rag-backend:latest}
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-investment_docs}
+      RAG_EMBEDDING_PROVIDER: hash
+    depends_on:
+      - qdrant
+    networks:
+      - investment-net
+    command: ["bash", "/app/scripts/upload_docs_to_qdrant.sh"]
+
+  search-index:
+    profiles: ["tools"]
+    image: ${BACKEND_IMAGE:-jumi-finance-rag-backend:latest}
+    environment:
+      MEILI_URL: http://meilisearch:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-change-this-production-search-key}
+    depends_on:
+      - meilisearch
+    networks:
+      - investment-net
+    command: ["python", "/app/scripts/index_docs_meilisearch.py"]
+
+networks:
+  investment-net:
+    driver: bridge
+
+volumes:
+  investment_mongo_data:
+  investment_qdrant_data:
+  investment_meilisearch_data:
